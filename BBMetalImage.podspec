@@ -27,7 +27,7 @@ Pod::Spec.new do |s|
 
   s.platform     = :ios, '10.0'
 
-  s.swift_version = '5.0'
+  s.swift_version = '5.5'
 
   s.source       = { :git => 'https://github.com/Silence-GitHub/BBMetalImage.git', :tag => s.version }
 
