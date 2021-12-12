@@ -12,23 +12,25 @@ public class CRTUtils: NSObject {
     let renderedCIImage = CIImage(cvImageBuffer: pixelBuffer)
 
     var bounds = renderedCIImage.extent
-    let imageWidth = bounds.height
-    let imageHeight = bounds.width
-    var realWidth = imageWidth
-    let realHeight = realWidth / aspectRatio
-    let changedHeightDelta = realHeight - imageHeight
+    if aspectRatio != 0 {
+      let imageWidth = bounds.height
+      let imageHeight = bounds.width
+      var realWidth = imageWidth
+      let realHeight = realWidth / aspectRatio
+      let changedHeightDelta = realHeight - imageHeight
 
-    var verticalCutOff = 0.0, horizontalCutOff = 0.0, zoom = 1.0
-    if (changedHeightDelta <= 0) {
-      verticalCutOff = -changedHeightDelta / 2
-    } else {
-      zoom = realHeight / imageHeight
-      realWidth = imageWidth / zoom
-      let changedWidthDelta = imageWidth - realWidth
-      horizontalCutOff = max(0, changedWidthDelta / 2)
+      var verticalCutOff = 0.0, horizontalCutOff = 0.0, zoom = 1.0
+      if (changedHeightDelta <= 0) {
+        verticalCutOff = -changedHeightDelta / 2
+      } else {
+        zoom = realHeight / imageHeight
+        realWidth = imageWidth / zoom
+        let changedWidthDelta = imageWidth - realWidth
+        horizontalCutOff = max(0, changedWidthDelta / 2)
+      }
+
+      bounds = bounds.insetBy(dx: verticalCutOff, dy: horizontalCutOff)
     }
-
-    bounds = bounds.insetBy(dx: verticalCutOff, dy: horizontalCutOff)
     guard let renderedCGImage = ciContext.createCGImage(renderedCIImage, from: bounds) else {
       print("Failed to create CGImage")
       return nil

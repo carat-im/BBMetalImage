@@ -90,8 +90,8 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
     self.intensity = intensity
   }
 
-  private func configureLutTexture(_ lutFilePath: NSString, _ filterDir: Int) {
-    if (lutFilePath.isKind(of: NSNull.self)) {
+  private func configureLutTexture(_ lutFilePath: NSString?, _ filterDir: Int) {
+    if (lutFilePath?.isKind(of: NSNull.self) != false) {
       lutTexture = nil
       return
     }
@@ -103,7 +103,7 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
       dirUrl = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
     }
 
-    guard let lutUrl = dirUrl?.appendingPathComponent(String(lutFilePath)) else {
+    guard let lutUrl = dirUrl?.appendingPathComponent(String(lutFilePath!)) else {
       lutTexture = nil
       return
     }
@@ -114,6 +114,11 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
 
   @objc
   public func render(pixelBuffer: CVPixelBuffer) -> CVPixelBuffer? {
+    render(inputTexture: makeTextureFromCVPixelBuffer(pixelBuffer: pixelBuffer, textureFormat: .bgra8Unorm));
+  }
+
+  @objc
+  public func render(inputTexture input: MTLTexture?) -> CVPixelBuffer? {
     if !isPrepared {
       assertionFailure("Invalid state: Not prepared.")
       return nil
@@ -125,7 +130,7 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
       print("Allocation failure: Could not get pixel buffer from pool. (\(self.description))")
       return nil
     }
-    guard let inputTexture = makeTextureFromCVPixelBuffer(pixelBuffer: pixelBuffer, textureFormat: .bgra8Unorm),
+    guard let inputTexture = input,
           let outputTexture = makeTextureFromCVPixelBuffer(pixelBuffer: outputPixelBuffer, textureFormat: .bgra8Unorm) else {
       return nil
     }
@@ -192,8 +197,9 @@ private extension Data {
   }
 }
 
-private extension UIImage {
-  var metalTexture: MTLTexture? {
+public extension UIImage {
+  @objc
+  public var metalTexture: MTLTexture? {
     // To ensure image orientation is correct, redraw image if image orientation is not up
     // https://stackoverflow.com/questions/42098390/swift-png-image-being-saved-with-incorrect-orientation
     if let cgimage = flattened?.cgImage {
