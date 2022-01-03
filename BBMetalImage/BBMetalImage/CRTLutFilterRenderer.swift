@@ -199,7 +199,7 @@ private extension Data {
 
 public extension UIImage {
   @objc
-  public var metalTexture: MTLTexture? {
+  var metalTexture: MTLTexture? {
     // To ensure image orientation is correct, redraw image if image orientation is not up
     // https://stackoverflow.com/questions/42098390/swift-png-image-being-saved-with-incorrect-orientation
     if let cgimage = flattened?.cgImage {
@@ -217,6 +217,24 @@ public extension UIImage {
     let result = UIGraphicsGetImageFromCurrentImageContext()
     UIGraphicsEndImageContext()
     return result
+  }
+
+  @objc
+  func withMaxDimension(_ dimension: CGFloat) -> UIImage {
+    let widthRatio = size.width / dimension
+    let heightRatio = size.height / dimension
+    if widthRatio > 1 || heightRatio > 1 {
+      let biggerRatio = max(widthRatio, heightRatio)
+      let percentage = 1 / biggerRatio
+      let canvas = CGSize(width: size.width * percentage, height: size.height * percentage)
+      let format = imageRendererFormat
+      return UIGraphicsImageRenderer(size: canvas, format: format).image {
+        _ in draw(in: CGRect(origin: .zero, size: canvas))
+      }
+    } else {
+      // No need to scale.
+      return self
+    }
   }
 }
 
