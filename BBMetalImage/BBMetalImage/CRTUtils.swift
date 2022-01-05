@@ -7,9 +7,13 @@ import MobileCoreServices
 
 @objcMembers
 public class CRTUtils: NSObject {
-  public static func jpegData(withPixelBuffer pixelBuffer: CVPixelBuffer, attachments: CFDictionary?, aspectRatio: Double) -> Data? {
+  public static func jpegData(withPixelBuffer pixelBuffer: CVPixelBuffer, attachments: CFDictionary?, aspectRatio: Double, mirror: Bool) -> Data? {
     let ciContext = CIContext()
-    let renderedCIImage = CIImage(cvImageBuffer: pixelBuffer)
+    var renderedCIImage = CIImage(cvImageBuffer: pixelBuffer)
+
+    if mirror {
+      renderedCIImage = renderedCIImage.oriented(.downMirrored)
+    }
 
     var bounds = renderedCIImage.extent
     if aspectRatio != 0 {
