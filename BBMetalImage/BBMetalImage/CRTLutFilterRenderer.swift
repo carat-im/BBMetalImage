@@ -25,7 +25,7 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
 
   private var computePipelineState: MTLComputePipelineState?
 
-  private var textureCache: CVMetalTextureCache!
+  private var textureCache: CoreVideo.CVMetalTextureCache!
 
   private lazy var commandQueue: MTLCommandQueue? = {
     self.metalDevice.makeCommandQueue()
@@ -57,7 +57,7 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
     }
     inputFormatDescription = formatDescription
 
-    var metalTextureCache: CVMetalTextureCache?
+    var metalTextureCache: CoreVideo.CVMetalTextureCache?
     if CVMetalTextureCacheCreate(kCFAllocatorDefault, nil, metalDevice, nil, &metalTextureCache) != kCVReturnSuccess {
       assertionFailure("Unable to allocate texture cache")
     } else {
@@ -172,7 +172,7 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
     let height = CVPixelBufferGetHeight(pixelBuffer)
 
     // Create a Metal texture from the image buffer.
-    var cvTextureOut: CVMetalTexture?
+    var cvTextureOut: CoreVideo.CVMetalTexture?
     CVMetalTextureCacheCreateTextureFromImage(kCFAllocatorDefault, textureCache, pixelBuffer, nil, textureFormat, width, height, 0, &cvTextureOut)
 
     guard let cvTexture = cvTextureOut, let texture = CVMetalTextureGetTexture(cvTexture) else {
