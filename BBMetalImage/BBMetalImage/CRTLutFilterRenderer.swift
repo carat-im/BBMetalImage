@@ -36,6 +36,8 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
   private var grain: Float = 0
   private var vignette: Float = 0
 
+  private var stickerTexture: MTLTexture?
+
   public required override init() {
     do {
       let library = try metalDevice.makeDefaultLibrary(bundle: Bundle(for: CRTLutFilterRenderer.self))
@@ -195,6 +197,13 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
 
     let data = try? Data(contentsOf: lutUrl)
     lutTexture = data?.metalTexture
+
+    guard let stickerLoc = Bundle(for: CRTLutFilterRenderer.self).url(forResource: "temp", withExtension: "png") else {
+      stickerTexture = nil
+      return
+    }
+    let stickerData = try? Data(contentsOf: stickerLoc)
+    stickerTexture = stickerData?.metalTexture
   }
 
   @objc
