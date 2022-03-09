@@ -1,16 +1,19 @@
 #include <metal_stdlib>
 using namespace metal;
 
-kernel void crtLutFilter(texture2d<half, access::read> inputTexture [[texture(0)]],
-                     texture2d<half, access::write> outputTexture [[texture(1)]],
-                     texture2d<half, access::sample> lookupTexture [[texture(2)]],
-                     constant float *intensity [[buffer(0)]],
-                     constant float *grain [[buffer(1)]],
-                     constant float *vignette [[buffer(2)]],
+#import "CRTShaderTypes.h"
+
+kernel void
+lutFilterKernel(texture2d<half, access::read> inputTexture [[texture(CRTTextureIndexInput)]],
+                     texture2d<half, access::write> outputTexture [[texture(CRTTextureIndexOutput)]],
+                     texture2d<half, access::sample> lookupTexture [[texture(CRTTextureIndexLut)]],
+                     constant float *intensity [[buffer(CRTBufferIndexIntensity)]],
+                     constant float *grain [[buffer(CRTBufferIndexGrain)]],
+                     constant float *vignette [[buffer(CRTBufferIndexVignette)]],
                      uint2 gid [[thread_position_in_grid]])
 {
     // Don't read or write outside of the texture.
-    if ((gid.x >= inputTexture.get_width()) || (gid.y >= inputTexture.get_height())) {
+    if ((gid.x >= outputTexture.get_width()) || (gid.y >= outputTexture.get_height())) {
         return;
     }
 

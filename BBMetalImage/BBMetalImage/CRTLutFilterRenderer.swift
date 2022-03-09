@@ -23,7 +23,7 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
 
   private let metalDevice = MTLCreateSystemDefaultDevice()!
 
-  private var computePipelineState: MTLComputePipelineState?
+  private var lutFilterComputePipeline: MTLComputePipelineState?
 
   private var textureCache: CoreVideo.CVMetalTextureCache!
 
@@ -39,8 +39,8 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
   public required override init() {
     do {
       let library = try metalDevice.makeDefaultLibrary(bundle: Bundle(for: CRTLutFilterRenderer.self))
-      let kernelFunction = library.makeFunction(name: "crtLutFilter")
-      computePipelineState = try metalDevice.makeComputePipelineState(function: kernelFunction!)
+      let kernelFunction = library.makeFunction(name: "lutFilterKernel")
+      lutFilterComputePipeline = try metalDevice.makeComputePipelineState(function: kernelFunction!)
     } catch {
       print("Could not create pipeline state: \(error)")
     }
@@ -50,7 +50,7 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
   public func prepare(with formatDescription: CMFormatDescription, outputRetainedBufferCountHint: Int) {
     reset()
 
-    (outputPixelBufferPool, _, outputFormatDescription) = allocateOutputBufferPool(with: formatDescription,
+    (outputPixelBufferPool, _, _) = allocateOutputBufferPool(with: formatDescription,
       outputRetainedBufferCountHint: outputRetainedBufferCountHint)
     if outputPixelBufferPool == nil {
       return
@@ -65,6 +65,91 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
     }
 
     isPrepared = true
+  }
+
+  private func allocateOutputBufferPool(with inputFormatDescription: CMFormatDescription, outputRetainedBufferCountHint: Int) -> (
+    outputBufferPool: CVPixelBufferPool?,
+    outputColorSpace: CGColorSpace?,
+    outputFormatDescription: CMFormatDescription?) {
+    let inputMediaSubType = CMFormatDescriptionGetMediaSubType(inputFormatDescription)
+    if inputMediaSubType != kCVPixelFormatType_32BGRA {
+      assertionFailure("Invalid input pixel buffer type \(inputMediaSubType)")
+      return (nil, nil, nil)
+    }
+
+    let inputDimensions = CMVideoFormatDescriptionGetDimensions(inputFormatDescription)
+    var pixelBufferAttributes: [String: Any] = [
+      kCVPixelBufferPixelFormatTypeKey as String: UInt(inputMediaSubType),
+      kCVPixelBufferWidthKey as String: Int(inputDimensions.width),
+      kCVPixelBufferHeightKey as String: Int(inputDimensions.height),
+      kCVPixelBufferIOSurfacePropertiesKey as String: [:]
+    ]
+
+    // Get pixel buffer attributes and color space from the input format description.
+    var cgColorSpace = CGColorSpaceCreateDeviceRGB()
+    if let inputFormatDescriptionExtension = CMFormatDescriptionGetExtensions(inputFormatDescription) as Dictionary? {
+      let colorPrimaries = inputFormatDescriptionExtension[kCVImageBufferColorPrimariesKey]
+
+      if let colorPrimaries = colorPrimaries {
+        var colorSpaceProperties: [String: AnyObject] = [kCVImageBufferColorPrimariesKey as String: colorPrimaries]
+
+        if let yCbCrMatrix = inputFormatDescriptionExtension[kCVImageBufferYCbCrMatrixKey] {
+          colorSpaceProperties[kCVImageBufferYCbCrMatrixKey as String] = yCbCrMatrix
+        }
+
+        if let transferFunction = inputFormatDescriptionExtension[kCVImageBufferTransferFunctionKey] {
+          colorSpaceProperties[kCVImageBufferTransferFunctionKey as String] = transferFunction
+        }
+
+        pixelBufferAttributes[kCVBufferPropagatedAttachmentsKey as String] = colorSpaceProperties
+      }
+
+      if let cvColorspace = inputFormatDescriptionExtension[kCVImageBufferCGColorSpaceKey] {
+        cgColorSpace = cvColorspace as! CGColorSpace
+      } else if (colorPrimaries as? String) == (kCVImageBufferColorPrimaries_P3_D65 as String) {
+        cgColorSpace = CGColorSpace(name: CGColorSpace.displayP3)!
+      }
+    }
+
+    // Create a pixel buffer pool with the same pixel attributes as the input format description.
+    let poolAttributes = [kCVPixelBufferPoolMinimumBufferCountKey as String: outputRetainedBufferCountHint]
+    var cvPixelBufferPool: CVPixelBufferPool?
+    CVPixelBufferPoolCreate(kCFAllocatorDefault, poolAttributes as NSDictionary?, pixelBufferAttributes as NSDictionary?, &cvPixelBufferPool)
+    guard let pixelBufferPool = cvPixelBufferPool else {
+      assertionFailure("Allocation failure: Could not allocate pixel buffer pool.")
+      return (nil, nil, nil)
+    }
+
+    preallocateBuffers(pool: pixelBufferPool, allocationThreshold: outputRetainedBufferCountHint)
+
+    // Get the output format description.
+    var pixelBuffer: CVPixelBuffer?
+    var outputFormatDescription: CMFormatDescription?
+    let auxAttributes = [kCVPixelBufferPoolAllocationThresholdKey as String: outputRetainedBufferCountHint] as NSDictionary
+    CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(kCFAllocatorDefault, pixelBufferPool, auxAttributes, &pixelBuffer)
+    if let pixelBuffer = pixelBuffer {
+      CMVideoFormatDescriptionCreateForImageBuffer(allocator: kCFAllocatorDefault,
+        imageBuffer: pixelBuffer,
+        formatDescriptionOut: &outputFormatDescription)
+    }
+    pixelBuffer = nil
+
+    return (pixelBufferPool, cgColorSpace, outputFormatDescription)
+  }
+
+  private func preallocateBuffers(pool: CVPixelBufferPool, allocationThreshold: Int) {
+    var pixelBuffers = [CVPixelBuffer]()
+    var error: CVReturn = kCVReturnSuccess
+    let auxAttributes = [kCVPixelBufferPoolAllocationThresholdKey as String: allocationThreshold] as NSDictionary
+    var pixelBuffer: CVPixelBuffer?
+    while error == kCVReturnSuccess {
+      error = CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(kCFAllocatorDefault, pool, auxAttributes, &pixelBuffer)
+      if let pixelBuffer = pixelBuffer {
+        pixelBuffers.append(pixelBuffer)
+      }
+      pixelBuffer = nil
+    }
+    pixelBuffers.removeAll()
   }
 
   @objc
@@ -91,13 +176,13 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
   }
 
   private func configureLutTexture(_ lutFilePath: NSString?, _ filterDir: Int) {
-    if (lutFilePath?.isKind(of: NSNull.self) != false) {
+    if lutFilePath?.isKind(of: NSNull.self) != false {
       lutTexture = nil
       return
     }
 
     let dirUrl: URL?
-    if (filterDir == CRTLutFilterRenderer.FILTER_DIR_CACHE) {
+    if filterDir == CRTLutFilterRenderer.FILTER_DIR_CACHE {
       dirUrl = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
     } else {
       dirUrl = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
@@ -138,36 +223,36 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
     // Set up command queue, buffer, and encoder.
     guard let commandQueue = commandQueue,
           let commandBuffer = commandQueue.makeCommandBuffer(),
-          let commandEncoder = commandBuffer.makeComputeCommandEncoder() else {
+          let computeEncoder = commandBuffer.makeComputeCommandEncoder() else {
       print("Failed to create a Metal command queue.")
-      CVMetalTextureCacheFlush(textureCache!, 0)
+      CVMetalTextureCacheFlush(textureCache, 0)
       return nil
     }
 
-    commandEncoder.label = "Rosy Metal"
-    commandEncoder.setComputePipelineState(computePipelineState!)
-    commandEncoder.setTexture(inputTexture, index: 0)
-    commandEncoder.setTexture(outputTexture, index: 1)
-    commandEncoder.setTexture(lutTexture, index: 2)
-    commandEncoder.setBytes(&intensity, length: MemoryLayout<Float>.size, index: 0)
-    commandEncoder.setBytes(&grain, length: MemoryLayout<Float>.size, index: 1)
-    commandEncoder.setBytes(&vignette, length: MemoryLayout<Float>.size, index: 2)
+    computeEncoder.label = "LutFilterEncoder"
+    computeEncoder.setComputePipelineState(lutFilterComputePipeline!)
+    computeEncoder.setTexture(inputTexture, index: Int(CRTTextureIndexInput.rawValue))
+    computeEncoder.setTexture(outputTexture, index: Int(CRTTextureIndexOutput.rawValue))
+    computeEncoder.setTexture(lutTexture, index: Int(CRTTextureIndexLut.rawValue))
+    computeEncoder.setBytes(&intensity, length: MemoryLayout<Float>.size, index: Int(CRTBufferIndexIntensity.rawValue))
+    computeEncoder.setBytes(&grain, length: MemoryLayout<Float>.size, index: Int(CRTBufferIndexGrain.rawValue))
+    computeEncoder.setBytes(&vignette, length: MemoryLayout<Float>.size, index: Int(CRTBufferIndexVignette.rawValue))
 
     // Set up the thread groups.
-    let width = computePipelineState!.threadExecutionWidth
-    let height = computePipelineState!.maxTotalThreadsPerThreadgroup / width
+    let width = lutFilterComputePipeline!.threadExecutionWidth
+    let height = lutFilterComputePipeline!.maxTotalThreadsPerThreadgroup / width
     let threadsPerThreadgroup = MTLSizeMake(width, height, 1)
     let threadgroupsPerGrid = MTLSize(width: (inputTexture.width + width - 1) / width,
       height: (inputTexture.height + height - 1) / height,
       depth: 1)
-    commandEncoder.dispatchThreadgroups(threadgroupsPerGrid, threadsPerThreadgroup: threadsPerThreadgroup)
+    computeEncoder.dispatchThreadgroups(threadgroupsPerGrid, threadsPerThreadgroup: threadsPerThreadgroup)
 
-    commandEncoder.endEncoding()
+    computeEncoder.endEncoding()
     commandBuffer.commit()
     return outputPixelBuffer
   }
 
-  func makeTextureFromCVPixelBuffer(pixelBuffer: CVPixelBuffer, textureFormat: MTLPixelFormat) -> MTLTexture? {
+  private func makeTextureFromCVPixelBuffer(pixelBuffer: CVPixelBuffer, textureFormat: MTLPixelFormat) -> MTLTexture? {
     let width = CVPixelBufferGetWidth(pixelBuffer)
     let height = CVPixelBufferGetHeight(pixelBuffer)
 
@@ -182,98 +267,5 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
     }
 
     return texture
-  }
-}
-
-private extension Data {
-  var metalTexture: MTLTexture? {
-    let loader = MTKTextureLoader(device: MTLCreateSystemDefaultDevice()!)
-    if let texture = try? loader.newTexture(data: self, options: [MTKTextureLoader.Option.SRGB: false]) {
-      return texture
-    }
-    // If image orientation is not up, texture loader may not load texture from image data.
-    // Create a UIImage from image data to get metal texture
-    return UIImage(data: self)?.metalTexture
-  }
-}
-
-public extension UIImage {
-  @objc
-  var metalTexture: MTLTexture? {
-    // To ensure image orientation is correct, redraw image if image orientation is not up
-    // https://stackoverflow.com/questions/42098390/swift-png-image-being-saved-with-incorrect-orientation
-    if let cgimage = flattened?.cgImage {
-      return cgimage.metalTexture
-    }
-    return nil
-  }
-
-  private var flattened: UIImage? {
-    if imageOrientation == .up {
-      return self
-    }
-    UIGraphicsBeginImageContextWithOptions(size, false, scale)
-    draw(in: CGRect(origin: .zero, size: size))
-    let result = UIGraphicsGetImageFromCurrentImageContext()
-    UIGraphicsEndImageContext()
-    return result
-  }
-
-  @objc
-  func withMaxDimension(_ dimension: CGFloat) -> UIImage {
-    let widthRatio = size.width / dimension
-    let heightRatio = size.height / dimension
-    if widthRatio > 1 || heightRatio > 1 {
-      let biggerRatio = max(widthRatio, heightRatio)
-      let percentage = 1 / biggerRatio
-      let canvas = CGSize(width: size.width * percentage, height: size.height * percentage)
-      let format = imageRendererFormat
-      return UIGraphicsImageRenderer(size: canvas, format: format).image {
-        _ in draw(in: CGRect(origin: .zero, size: canvas))
-      }
-    } else {
-      // No need to scale.
-      return self
-    }
-  }
-}
-
-private extension CGImage {
-  var metalTexture: MTLTexture? {
-    let device = MTLCreateSystemDefaultDevice()!
-    let loader = MTKTextureLoader(device: device)
-    if let texture = try? loader.newTexture(cgImage: self, options: [MTKTextureLoader.Option.SRGB: false]) {
-      return texture
-    }
-    // Texture loader can not load image data to create texture
-    // Draw image and create texture
-    let descriptor = MTLTextureDescriptor()
-    descriptor.pixelFormat = .rgba8Unorm
-    descriptor.width = width
-    descriptor.height = height
-    descriptor.usage = .shaderRead
-    let bytesPerRow: Int = width * 4
-    let bitmapInfo: UInt32 = CGImageAlphaInfo.premultipliedLast.rawValue
-    if let currentTexture = device.makeTexture(descriptor: descriptor),
-       let context = CGContext(data: nil,
-         width: width,
-         height: height,
-         bitsPerComponent: 8,
-         bytesPerRow: bytesPerRow,
-         space: CGColorSpaceCreateDeviceRGB(),
-         bitmapInfo: bitmapInfo) {
-
-      context.draw(self, in: CGRect(x: 0, y: 0, width: width, height: height))
-
-      if let data = context.data {
-        currentTexture.replace(region: MTLRegionMake3D(0, 0, 0, width, height, 1),
-          mipmapLevel: 0,
-          withBytes: data,
-          bytesPerRow: bytesPerRow)
-
-        return currentTexture
-      }
-    }
-    return nil
   }
 }
