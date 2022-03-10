@@ -37,12 +37,35 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
   private var vignette: Float = 0
 
   private var stickerTexture: MTLTexture?
+  private var stickerRenderPipeline: MTLRenderPipelineState?
+  private let stickerRenderPassDescriptor = MTLRenderPassDescriptor()
+
+  private static let stickerSize: Float = 100
+  private let quadVertices = [
+    CRTVertex(position: vector_float2(stickerSize, -stickerSize), textureCoordinate: vector_float2(1, 1)),
+    CRTVertex(position: vector_float2(-stickerSize, -stickerSize), textureCoordinate: vector_float2(0, 1)),
+    CRTVertex(position: vector_float2(-stickerSize, stickerSize), textureCoordinate: vector_float2(0, 0)),
+    CRTVertex(position: vector_float2(stickerSize, -stickerSize), textureCoordinate: vector_float2(1, 1)),
+    CRTVertex(position: vector_float2(-stickerSize, stickerSize), textureCoordinate: vector_float2(0, 0)),
+    CRTVertex(position: vector_float2(stickerSize, stickerSize), textureCoordinate: vector_float2(1, 0)),
+  ]
 
   public required override init() {
     do {
       let library = try metalDevice.makeDefaultLibrary(bundle: Bundle(for: CRTLutFilterRenderer.self))
       let kernelFunction = library.makeFunction(name: "lutFilterKernel")
       lutFilterComputePipeline = try metalDevice.makeComputePipelineState(function: kernelFunction!)
+
+      let renderPipelineDescriptor = MTLRenderPipelineDescriptor()
+      renderPipelineDescriptor.label = "StickerRenderPipeline"
+      renderPipelineDescriptor.vertexFunction = library.makeFunction(name: "vertexShader")
+      renderPipelineDescriptor.fragmentFunction = library.makeFunction(name: "samplingShader")
+      renderPipelineDescriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
+      renderPipelineDescriptor.isAlphaToCoverageEnabled = true
+      stickerRenderPipeline = try metalDevice.makeRenderPipelineState(descriptor: renderPipelineDescriptor)
+
+      stickerRenderPassDescriptor.colorAttachments[0].loadAction = .load
+      stickerRenderPassDescriptor.colorAttachments[0].storeAction = .store
     } catch {
       print("Could not create pipeline state: \(error)")
     }
@@ -257,6 +280,20 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
     computeEncoder.dispatchThreadgroups(threadgroupsPerGrid, threadsPerThreadgroup: threadsPerThreadgroup)
 
     computeEncoder.endEncoding()
+
+    stickerRenderPassDescriptor.colorAttachments[0].texture = outputTexture
+    var viewportSize = vector_uint2(x: UInt32(outputTexture.width), y: UInt32(outputTexture.height));
+
+    let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: stickerRenderPassDescriptor)!
+    renderEncoder.label = "StickerRenderEncoder"
+    renderEncoder.setViewport(MTLViewport(originX: 0, originY: 0, width: Double(viewportSize.x), height: Double(viewportSize.y), znear: -1, zfar: 1))
+    renderEncoder.setRenderPipelineState(stickerRenderPipeline!)
+    renderEncoder.setVertexBytes(quadVertices, length: MemoryLayout<vector_float2>.size * quadVertices.count * 2, index: Int(CRTVertexIndexVertices.rawValue))
+    renderEncoder.setVertexBytes(&viewportSize, length: MemoryLayout.size(ofValue: viewportSize), index: Int(CRTVertexIndexViewportSize.rawValue))
+    renderEncoder.setFragmentTexture(stickerTexture, index: Int(CRTTextureIndexInput.rawValue))
+    renderEncoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6)
+    renderEncoder.endEncoding()
+
     commandBuffer.commit()
     return outputPixelBuffer
   }
