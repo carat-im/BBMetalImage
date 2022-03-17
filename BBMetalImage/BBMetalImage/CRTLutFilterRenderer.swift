@@ -36,19 +36,25 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
   private var grain: Float = 0
   private var vignette: Float = 0
 
-  private var stickerTexture: MTLTexture?
+  // Flutter 단 기준의 viewport.
+  // 이용할 때 outputTexture 사이즈와 함께 계산하여 실제 사이즈를 측정해야함.
+  private var stickerBoardViewport: (width: Double, height: Double) = (0, 0)
+
+  private var stickerViews: [CRTStickerView] = []
+
+//  private var stickerTexture: MTLTexture?
   private var stickerRenderPipeline: MTLRenderPipelineState?
   private let stickerRenderPassDescriptor = MTLRenderPassDescriptor()
 
-  private static let stickerSize: Float = 100
-  private let quadVertices = [
-    CRTVertex(position: vector_float2(stickerSize, -stickerSize), textureCoordinate: vector_float2(1, 1)),
-    CRTVertex(position: vector_float2(-stickerSize, -stickerSize), textureCoordinate: vector_float2(0, 1)),
-    CRTVertex(position: vector_float2(-stickerSize, stickerSize), textureCoordinate: vector_float2(0, 0)),
-    CRTVertex(position: vector_float2(stickerSize, -stickerSize), textureCoordinate: vector_float2(1, 1)),
-    CRTVertex(position: vector_float2(-stickerSize, stickerSize), textureCoordinate: vector_float2(0, 0)),
-    CRTVertex(position: vector_float2(stickerSize, stickerSize), textureCoordinate: vector_float2(1, 0)),
-  ]
+//  private static let stickerSize: Float = 100
+//  private let quadVertices = [
+//    CRTVertex(position: vector_float2(stickerSize, -stickerSize), textureCoordinate: vector_float2(1, 1)),
+//    CRTVertex(position: vector_float2(-stickerSize, -stickerSize), textureCoordinate: vector_float2(0, 1)),
+//    CRTVertex(position: vector_float2(-stickerSize, stickerSize), textureCoordinate: vector_float2(0, 0)),
+//    CRTVertex(position: vector_float2(stickerSize, -stickerSize), textureCoordinate: vector_float2(1, 1)),
+//    CRTVertex(position: vector_float2(-stickerSize, stickerSize), textureCoordinate: vector_float2(0, 0)),
+//    CRTVertex(position: vector_float2(stickerSize, stickerSize), textureCoordinate: vector_float2(1, 0)),
+//  ]
 
   public required override init() {
     do {
@@ -221,12 +227,12 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
     let data = try? Data(contentsOf: lutUrl)
     lutTexture = data?.metalTexture
 
-    guard let stickerLoc = Bundle(for: CRTLutFilterRenderer.self).url(forResource: "temp", withExtension: "png") else {
-      stickerTexture = nil
-      return
-    }
-    let stickerData = try? Data(contentsOf: stickerLoc)
-    stickerTexture = stickerData?.metalTexture
+//    guard let stickerLoc = Bundle(for: CRTLutFilterRenderer.self).url(forResource: "temp", withExtension: "png") else {
+//      stickerTexture = nil
+//      return
+//    }
+//    let stickerData = try? Data(contentsOf: stickerLoc)
+//    stickerTexture = stickerData?.metalTexture
   }
 
   @objc
@@ -282,17 +288,27 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
     computeEncoder.endEncoding()
 
     stickerRenderPassDescriptor.colorAttachments[0].texture = outputTexture
+
+    // todo: 9:16 상황때는 계산이 달라야함.
+    let multiplier: Float = Float(Double(outputTexture.width) / stickerBoardViewport.width);
     var viewportSize = vector_uint2(x: UInt32(outputTexture.width), y: UInt32(outputTexture.height));
 
-    let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: stickerRenderPassDescriptor)!
-    renderEncoder.label = "StickerRenderEncoder"
-    renderEncoder.setViewport(MTLViewport(originX: 0, originY: 0, width: Double(viewportSize.x), height: Double(viewportSize.y), znear: -1, zfar: 1))
-    renderEncoder.setRenderPipelineState(stickerRenderPipeline!)
-    renderEncoder.setVertexBytes(quadVertices, length: MemoryLayout<vector_float2>.size * quadVertices.count * 2, index: Int(CRTVertexIndexVertices.rawValue))
-    renderEncoder.setVertexBytes(&viewportSize, length: MemoryLayout.size(ofValue: viewportSize), index: Int(CRTVertexIndexViewportSize.rawValue))
-    renderEncoder.setFragmentTexture(stickerTexture, index: Int(CRTTextureIndexInput.rawValue))
-    renderEncoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6)
-    renderEncoder.endEncoding()
+    let halfMultiplier = multiplier / 2;
+    for stickerView in stickerViews {
+      let quadVertices = stickerView.verticesOnBoard.map {
+        CRTVertex(position: vector_float2($0.position.x * halfMultiplier, $0.position.y * halfMultiplier), textureCoordinate: $0.textureCoordinate)
+      }
+
+      let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: stickerRenderPassDescriptor)!
+      renderEncoder.label = "StickerRenderEncoder"
+      renderEncoder.setViewport(MTLViewport(originX: 0, originY: 0, width: Double(viewportSize.x), height: Double(viewportSize.y), znear: -1, zfar: 1))
+      renderEncoder.setRenderPipelineState(stickerRenderPipeline!)
+      renderEncoder.setVertexBytes(quadVertices, length: MemoryLayout<vector_float2>.size * quadVertices.count * 2, index: Int(CRTVertexIndexVertices.rawValue))
+      renderEncoder.setVertexBytes(&viewportSize, length: MemoryLayout.size(ofValue: viewportSize), index: Int(CRTVertexIndexViewportSize.rawValue))
+      renderEncoder.setFragmentTexture(stickerView.imageTexture, index: Int(CRTTextureIndexInput.rawValue))
+      renderEncoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6)
+      renderEncoder.endEncoding()
+    }
 
     commandBuffer.commit()
     return outputPixelBuffer
@@ -313,5 +329,49 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
     }
 
     return texture
+  }
+
+  @objc
+  public func setStickerBoardViewport(width: Double, height: Double) {
+    stickerBoardViewport = (width, height)
+  }
+
+  @objc
+  public func addStickerView(id: Int, imagePath: String, centerX: Double, centerY: Double, size: Double) {
+//    guard let imageUrl = URL(string: imagePath),
+//          let imageData = try? Data(contentsOf: imageUrl),
+//          let imageTexture = imageData.metalTexture else {
+//      // todo: boolean을 리턴해서 플러터 단에서도 없애야함.
+//      return;
+//    }
+
+    let dirUrl = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+    let imageUrl = URL(string: imagePath, relativeTo: dirUrl)
+    if imageUrl == nil {
+      return
+
+    }
+    let imageData = try? Data(contentsOf: imageUrl!)
+    if imageData == nil {
+      return
+    }
+
+    let imageTexture = imageData!.metalTexture
+    if imageTexture == nil {
+      return
+    }
+
+    let centerX = stickerBoardViewport.width / 2 * centerX;
+    let centerY = stickerBoardViewport.height / 2 * centerY;
+    let verticesOnBoard = [
+      CRTVertex(position: vector_float2(Float(centerX + size), Float(centerY - size)), textureCoordinate: vector_float2(1, 1)),
+      CRTVertex(position: vector_float2(Float(centerX - size), Float(centerY - size)), textureCoordinate: vector_float2(0, 1)),
+      CRTVertex(position: vector_float2(Float(centerX - size), Float(centerY + size)), textureCoordinate: vector_float2(0, 0)),
+      CRTVertex(position: vector_float2(Float(centerX + size), Float(centerY - size)), textureCoordinate: vector_float2(1, 1)),
+      CRTVertex(position: vector_float2(Float(centerX - size), Float(centerY + size)), textureCoordinate: vector_float2(0, 0)),
+      CRTVertex(position: vector_float2(Float(centerX + size), Float(centerY + size)), textureCoordinate: vector_float2(1, 0)),
+    ]
+
+    stickerViews.append(CRTStickerView(id: id, imageTexture: imageTexture!, verticesOnBoard: verticesOnBoard))
   }
 }
