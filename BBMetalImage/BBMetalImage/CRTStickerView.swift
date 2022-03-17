@@ -7,5 +7,5 @@ import Foundation
 struct CRTStickerView {
   let id: Int
   let imageTexture: MTLTexture
-  let verticesOnBoard: [CRTVertex]
+  var verticesOnBoard: [CRTVertex]
 }

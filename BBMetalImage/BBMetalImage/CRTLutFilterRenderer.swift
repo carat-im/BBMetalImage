@@ -351,12 +351,13 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
   @objc
   public func addStickerView(id: Int, imagePath: String, centerX: Double, centerY: Double, size: Double) {
     let i = stickerViews.firstIndex(where: { $0.id == id })
+
     if i == nil {
       let dirUrl = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
       guard let imageUrl = URL(string: imagePath, relativeTo: dirUrl),
             let imageData = try? Data(contentsOf: imageUrl),
             let imageTexture = imageData.metalTexture else {
-        return;
+        return
       }
 
       let centerX = stickerBoardViewport.width / 2 * centerX;
@@ -373,8 +374,25 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
 
       stickerViews.append(CRTStickerView(id: id, imageTexture: imageTexture, verticesOnBoard: verticesOnBoard))
     } else {
-      let removed = stickerViews.remove(at: i!)
-      stickerViews.append(removed)
+      let centerX = stickerBoardViewport.width / 2 * centerX;
+      let centerY = stickerBoardViewport.height / 2 * centerY;
+      let halfSize = size / 2;
+      let verticesOnBoard = [
+        CRTVertex(position: vector_float2(Float(centerX + halfSize), Float(centerY - halfSize)), textureCoordinate: vector_float2(1, 1)),
+        CRTVertex(position: vector_float2(Float(centerX - halfSize), Float(centerY - halfSize)), textureCoordinate: vector_float2(0, 1)),
+        CRTVertex(position: vector_float2(Float(centerX - halfSize), Float(centerY + halfSize)), textureCoordinate: vector_float2(0, 0)),
+        CRTVertex(position: vector_float2(Float(centerX + halfSize), Float(centerY - halfSize)), textureCoordinate: vector_float2(1, 1)),
+        CRTVertex(position: vector_float2(Float(centerX - halfSize), Float(centerY + halfSize)), textureCoordinate: vector_float2(0, 0)),
+        CRTVertex(position: vector_float2(Float(centerX + halfSize), Float(centerY + halfSize)), textureCoordinate: vector_float2(1, 0)),
+      ]
+
+      if i == stickerViews.count - 1 {
+        stickerViews[i!].verticesOnBoard = verticesOnBoard
+      } else {
+        var removed = stickerViews.remove(at: i!)
+        removed.verticesOnBoard = verticesOnBoard
+        stickerViews.append(removed)
+      }
     }
   }
 }
