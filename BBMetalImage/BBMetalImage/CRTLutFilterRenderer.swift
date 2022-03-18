@@ -425,4 +425,13 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
       }
     }
   }
+
+  @objc
+  public func removeStickerView(id: Int) {
+    guard let i = stickerViews.firstIndex(where: { $0.id == id }) else {
+      return;
+    }
+    
+    stickerViews.remove(at: i)
+  }
 }
