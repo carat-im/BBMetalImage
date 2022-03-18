@@ -36,14 +36,23 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
   private var grain: Float = 0
   private var vignette: Float = 0
 
-  // Flutter 단 기준의 viewport.
-  // 이용할 때 outputTexture 사이즈와 함께 계산하여 실제 사이즈를 측정해야함.
-  private var stickerBoardViewport: (width: Double, height: Double) = (0, 0)
+  // 화면에 보이는 프리뷰 기준의 viewport e.g. 360x640
+  private var previewStickerBoardViewport: (width: Double, height: Double) = (0, 0)
 
   private var stickerViews: [CRTStickerView] = []
 
   private var stickerRenderPipeline: MTLRenderPipelineState?
   private let stickerRenderPassDescriptor = MTLRenderPassDescriptor()
+
+  // 후면 카메라용.
+  let stickerTextureCoordinatesBack = [
+    vector_float2(0, 1),
+    vector_float2(0, 0),
+    vector_float2(1, 0),
+    vector_float2(0, 1),
+    vector_float2(1, 0),
+    vector_float2(1, 1),
+  ]
 
   public required override init() {
     do {
@@ -249,6 +258,8 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
       return nil
     }
 
+    // LUT 필터 시작
+
     computeEncoder.label = "LutFilterEncoder"
     computeEncoder.setComputePipelineState(lutFilterComputePipeline!)
     computeEncoder.setTexture(inputTexture, index: Int(CRTTextureIndexInput.rawValue))
@@ -269,58 +280,99 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
 
     computeEncoder.endEncoding()
 
+    // LUT 필터 끝
+
+    // 스티커 시작
+
     if !stickerViews.isEmpty {
       stickerRenderPassDescriptor.colorAttachments[0].texture = outputTexture
 
       let isWidthHeightOpposite = outputTexture.width > outputTexture.height
-      let textureWidth: Double = isWidthHeightOpposite ? Double(outputTexture.height) : Double(outputTexture.width)
-      let textureHeight: Double = isWidthHeightOpposite ? Double(outputTexture.width) : Double(outputTexture.height)
-      var multiplier: Double = textureWidth / stickerBoardViewport.width
 
-      var realStickerBoardWidth = stickerBoardViewport.width * multiplier
-      var realStickerBoardHeight = stickerBoardViewport.height * multiplier
-      if realStickerBoardHeight > textureHeight {
-        multiplier = textureHeight / stickerBoardViewport.height
-        realStickerBoardWidth = stickerBoardViewport.width * multiplier
-        realStickerBoardHeight = stickerBoardViewport.height * multiplier
+      // 화면에 보이는 프리뷰 기준의 width와 height.
+      let previewTextureWidth: Double = isWidthHeightOpposite ? Double(outputTexture.height) : Double(outputTexture.width)
+      let previewTextureHeight: Double = isWidthHeightOpposite ? Double(outputTexture.width) : Double(outputTexture.height)
+
+      var multiplier: Double = previewTextureWidth / previewStickerBoardViewport.width
+
+      var realPreviewStickerBoardWidth = previewStickerBoardViewport.width * multiplier
+      var realPreviewStickerBoardHeight = previewStickerBoardViewport.height * multiplier
+
+      // 프리뷰를 9:16으로 보고있을때의 케이스
+      if realPreviewStickerBoardHeight > previewTextureHeight {
+        multiplier = previewTextureHeight / previewStickerBoardViewport.height
+        realPreviewStickerBoardWidth = previewStickerBoardViewport.width * multiplier
+        realPreviewStickerBoardHeight = previewStickerBoardViewport.height * multiplier
       }
 
-      var realStickerBoardViewport = isWidthHeightOpposite
-        ? vector_uint2(x: UInt32(realStickerBoardHeight), y: UInt32(realStickerBoardWidth))
-        : vector_uint2(x: UInt32(realStickerBoardWidth), y: UInt32(realStickerBoardHeight))
       let mtlViewport = isWidthHeightOpposite ? MTLViewport(
-        originX: (textureHeight - realStickerBoardHeight) / 2,
-        originY: (textureWidth - realStickerBoardWidth) / 2,
-        width: realStickerBoardHeight,
-        height: realStickerBoardWidth,
+        originX: (previewTextureHeight - realPreviewStickerBoardHeight) / 2,
+        originY: (previewTextureWidth - realPreviewStickerBoardWidth) / 2,
+        width: realPreviewStickerBoardHeight,
+        height: realPreviewStickerBoardWidth,
         znear: -1,
         zfar: 1
       ) : MTLViewport(
-        originX: (textureWidth - realStickerBoardWidth) / 2,
-        originY: (textureHeight - realStickerBoardHeight) / 2,
-        width: realStickerBoardWidth,
-        height: realStickerBoardHeight,
+        originX: (previewTextureWidth - realPreviewStickerBoardWidth) / 2,
+        originY: (previewTextureHeight - realPreviewStickerBoardHeight) / 2,
+        width: realPreviewStickerBoardWidth,
+        height: realPreviewStickerBoardHeight,
         znear: -1,
         zfar: 1
       )
 
       let mf = Float(multiplier)
+      // 프리뷰에 보이는 것이 아닌, 카메라 데이터 기준의 스티커 보드 viewport.
+      var cameraDataStickerBoardViewport = isWidthHeightOpposite
+        ? vector_uint2(x: UInt32(realPreviewStickerBoardHeight), y: UInt32(realPreviewStickerBoardWidth))
+        : vector_uint2(x: UInt32(realPreviewStickerBoardWidth), y: UInt32(realPreviewStickerBoardHeight))
+
       for stickerView in stickerViews {
-        let quadVertices = stickerView.verticesOnBoard.map {
-          CRTVertex(position: vector_float2($0.position.x * mf, $0.position.y * mf), textureCoordinate: $0.textureCoordinate)
+        let previewCenterX = stickerView.centerInPreview.x
+        let previewCenterY = stickerView.centerInPreview.y
+
+        // 후면 카메라의 경우, cameraData가 preview에 보이기까지 2 과정을 거친다.
+        // 1. 위아래 flip.
+        // 2. 90도 clockwise 회전.
+        // 따라서, 이 과정을 반대로 거친 위치에 스티커를 붙여야 한다.
+
+        // 90도만큼 counter-clockwise로 회전
+        let radians = 90 * Double.pi / 180
+        var cameraDataCenterXNorm = previewCenterX * cos(radians) - previewCenterY * sin(radians)
+        var cameraDataCenterYNorm = previewCenterX * sin(radians) + previewCenterY * cos(radians)
+
+        // 위 아래 flip.
+        if (isWidthHeightOpposite) {
+          cameraDataCenterXNorm *= -1
+        } else {
+          cameraDataCenterYNorm *= -1
         }
+
+        let cameraDataCenterX: Float = Float(Double(cameraDataStickerBoardViewport.x) / 2 * cameraDataCenterXNorm)
+        let cameraDataCenterY: Float = Float(Double(cameraDataStickerBoardViewport.y) / 2 * cameraDataCenterYNorm)
+        let halfSize: Float = Float(stickerView.size / 2) * mf
+        let quadVertices = [
+          CRTVertex(position: vector_float2(cameraDataCenterX + halfSize, cameraDataCenterY - halfSize), textureCoordinate: stickerTextureCoordinatesBack[0]),
+          CRTVertex(position: vector_float2(cameraDataCenterX - halfSize, cameraDataCenterY - halfSize), textureCoordinate: stickerTextureCoordinatesBack[1]),
+          CRTVertex(position: vector_float2(cameraDataCenterX - halfSize, cameraDataCenterY + halfSize), textureCoordinate: stickerTextureCoordinatesBack[2]),
+          CRTVertex(position: vector_float2(cameraDataCenterX + halfSize, cameraDataCenterY - halfSize), textureCoordinate: stickerTextureCoordinatesBack[3]),
+          CRTVertex(position: vector_float2(cameraDataCenterX - halfSize, cameraDataCenterY + halfSize), textureCoordinate: stickerTextureCoordinatesBack[4]),
+          CRTVertex(position: vector_float2(cameraDataCenterX + halfSize, cameraDataCenterY + halfSize), textureCoordinate: stickerTextureCoordinatesBack[5]),
+        ]
 
         let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: stickerRenderPassDescriptor)!
         renderEncoder.label = "StickerRenderEncoder"
         renderEncoder.setViewport(mtlViewport)
         renderEncoder.setRenderPipelineState(stickerRenderPipeline!)
         renderEncoder.setVertexBytes(quadVertices, length: MemoryLayout<vector_float2>.size * quadVertices.count * 2, index: Int(CRTVertexIndexVertices.rawValue))
-        renderEncoder.setVertexBytes(&realStickerBoardViewport, length: MemoryLayout.size(ofValue: realStickerBoardViewport), index: Int(CRTVertexIndexViewportSize.rawValue))
+        renderEncoder.setVertexBytes(&cameraDataStickerBoardViewport, length: MemoryLayout.size(ofValue: cameraDataStickerBoardViewport), index: Int(CRTVertexIndexViewportSize.rawValue))
         renderEncoder.setFragmentTexture(stickerView.imageTexture, index: Int(CRTTextureIndexInput.rawValue))
         renderEncoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6)
         renderEncoder.endEncoding()
       }
     }
+
+    // 스티커 끝
 
     commandBuffer.commit()
     return outputPixelBuffer
@@ -345,7 +397,7 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
 
   @objc
   public func setStickerBoardViewport(width: Double, height: Double) {
-    stickerBoardViewport = (width, height)
+    previewStickerBoardViewport = (width, height)
   }
 
   @objc
@@ -360,37 +412,15 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
         return
       }
 
-      let centerX = stickerBoardViewport.width / 2 * centerX;
-      let centerY = stickerBoardViewport.height / 2 * centerY;
-      let halfSize = size / 2;
-      let verticesOnBoard = [
-        CRTVertex(position: vector_float2(Float(centerX + halfSize), Float(centerY - halfSize)), textureCoordinate: vector_float2(1, 1)),
-        CRTVertex(position: vector_float2(Float(centerX - halfSize), Float(centerY - halfSize)), textureCoordinate: vector_float2(0, 1)),
-        CRTVertex(position: vector_float2(Float(centerX - halfSize), Float(centerY + halfSize)), textureCoordinate: vector_float2(0, 0)),
-        CRTVertex(position: vector_float2(Float(centerX + halfSize), Float(centerY - halfSize)), textureCoordinate: vector_float2(1, 1)),
-        CRTVertex(position: vector_float2(Float(centerX - halfSize), Float(centerY + halfSize)), textureCoordinate: vector_float2(0, 0)),
-        CRTVertex(position: vector_float2(Float(centerX + halfSize), Float(centerY + halfSize)), textureCoordinate: vector_float2(1, 0)),
-      ]
-
-      stickerViews.append(CRTStickerView(id: id, imageTexture: imageTexture, verticesOnBoard: verticesOnBoard))
+      stickerViews.append(CRTStickerView(id: id, imageTexture: imageTexture, centerInPreview: (centerX, centerY), size: size))
     } else {
-      let centerX = stickerBoardViewport.width / 2 * centerX;
-      let centerY = stickerBoardViewport.height / 2 * centerY;
-      let halfSize = size / 2;
-      let verticesOnBoard = [
-        CRTVertex(position: vector_float2(Float(centerX + halfSize), Float(centerY - halfSize)), textureCoordinate: vector_float2(1, 1)),
-        CRTVertex(position: vector_float2(Float(centerX - halfSize), Float(centerY - halfSize)), textureCoordinate: vector_float2(0, 1)),
-        CRTVertex(position: vector_float2(Float(centerX - halfSize), Float(centerY + halfSize)), textureCoordinate: vector_float2(0, 0)),
-        CRTVertex(position: vector_float2(Float(centerX + halfSize), Float(centerY - halfSize)), textureCoordinate: vector_float2(1, 1)),
-        CRTVertex(position: vector_float2(Float(centerX - halfSize), Float(centerY + halfSize)), textureCoordinate: vector_float2(0, 0)),
-        CRTVertex(position: vector_float2(Float(centerX + halfSize), Float(centerY + halfSize)), textureCoordinate: vector_float2(1, 0)),
-      ]
-
       if i == stickerViews.count - 1 {
-        stickerViews[i!].verticesOnBoard = verticesOnBoard
+        stickerViews[i!].centerInPreview = (centerX, centerY)
+        stickerViews[i!].size = size
       } else {
         var removed = stickerViews.remove(at: i!)
-        removed.verticesOnBoard = verticesOnBoard
+        removed.centerInPreview = (centerX, centerY)
+        removed.size = size
         stickerViews.append(removed)
       }
     }
