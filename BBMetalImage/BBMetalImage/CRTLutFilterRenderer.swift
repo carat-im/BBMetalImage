@@ -337,7 +337,7 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
         // 따라서, 이 과정을 반대로 거친 위치에 스티커를 붙여야 한다.
 
         // 90도만큼 counter-clockwise로 회전
-        let radians = 90 * Double.pi / 180
+        let radians = Double.pi / 2
         var cameraDataCenterXNorm = previewCenterX * cos(radians) - previewCenterY * sin(radians)
         var cameraDataCenterYNorm = previewCenterX * sin(radians) + previewCenterY * cos(radians)
 
@@ -351,13 +351,34 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
         let cameraDataCenterX: Float = Float(Double(cameraDataStickerBoardViewport.x) / 2 * cameraDataCenterXNorm)
         let cameraDataCenterY: Float = Float(Double(cameraDataStickerBoardViewport.y) / 2 * cameraDataCenterYNorm)
         let halfSize: Float = Float(stickerView.size / 2) * mf
+        let stickerRadians: Float = Float.pi * 2 - Float(stickerView.radians) // counter-clockwise로 변환.
+        var quadPositions: [vector_float2] = []
+        var x: Float = cosf(stickerRadians) * halfSize - sinf(stickerRadians) * -halfSize + cameraDataCenterX
+        var y: Float = sinf(stickerRadians) * halfSize + cosf(stickerRadians) * -halfSize + cameraDataCenterY
+        quadPositions.append(vector_float2(x, y))
+        x = cosf(stickerRadians) * -halfSize - sinf(stickerRadians) * -halfSize + cameraDataCenterX
+        y = sinf(stickerRadians) * -halfSize + cosf(stickerRadians) * -halfSize + cameraDataCenterY
+        quadPositions.append(vector_float2(x, y))
+        x = cosf(stickerRadians) * -halfSize - sinf(stickerRadians) * halfSize + cameraDataCenterX
+        y = sinf(stickerRadians) * -halfSize + cosf(stickerRadians) * halfSize + cameraDataCenterY
+        quadPositions.append(vector_float2(x, y))
+        x = cosf(stickerRadians) * halfSize - sinf(stickerRadians) * -halfSize + cameraDataCenterX
+        y = sinf(stickerRadians) * halfSize + cosf(stickerRadians) * -halfSize + cameraDataCenterY
+        quadPositions.append(vector_float2(x, y))
+        x = cosf(stickerRadians) * -halfSize - sinf(stickerRadians) * halfSize + cameraDataCenterX
+        y = sinf(stickerRadians) * -halfSize + cosf(stickerRadians) * halfSize + cameraDataCenterY
+        quadPositions.append(vector_float2(x, y))
+        x = cosf(stickerRadians) * halfSize - sinf(stickerRadians) * halfSize + cameraDataCenterX
+        y = sinf(stickerRadians) * halfSize + cosf(stickerRadians) * halfSize + cameraDataCenterY
+        quadPositions.append(vector_float2(x, y))
+
         let quadVertices = [
-          CRTVertex(position: vector_float2(cameraDataCenterX + halfSize, cameraDataCenterY - halfSize), textureCoordinate: stickerTextureCoordinatesBack[0]),
-          CRTVertex(position: vector_float2(cameraDataCenterX - halfSize, cameraDataCenterY - halfSize), textureCoordinate: stickerTextureCoordinatesBack[1]),
-          CRTVertex(position: vector_float2(cameraDataCenterX - halfSize, cameraDataCenterY + halfSize), textureCoordinate: stickerTextureCoordinatesBack[2]),
-          CRTVertex(position: vector_float2(cameraDataCenterX + halfSize, cameraDataCenterY - halfSize), textureCoordinate: stickerTextureCoordinatesBack[3]),
-          CRTVertex(position: vector_float2(cameraDataCenterX - halfSize, cameraDataCenterY + halfSize), textureCoordinate: stickerTextureCoordinatesBack[4]),
-          CRTVertex(position: vector_float2(cameraDataCenterX + halfSize, cameraDataCenterY + halfSize), textureCoordinate: stickerTextureCoordinatesBack[5]),
+          CRTVertex(position: quadPositions[0], textureCoordinate: stickerTextureCoordinatesBack[0]),
+          CRTVertex(position: quadPositions[1], textureCoordinate: stickerTextureCoordinatesBack[1]),
+          CRTVertex(position: quadPositions[2], textureCoordinate: stickerTextureCoordinatesBack[2]),
+          CRTVertex(position: quadPositions[3], textureCoordinate: stickerTextureCoordinatesBack[3]),
+          CRTVertex(position: quadPositions[4], textureCoordinate: stickerTextureCoordinatesBack[4]),
+          CRTVertex(position: quadPositions[5], textureCoordinate: stickerTextureCoordinatesBack[5]),
         ]
 
         let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: stickerRenderPassDescriptor)!
@@ -401,7 +422,7 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
   }
 
   @objc
-  public func addStickerView(id: Int, imagePath: String, centerX: Double, centerY: Double, size: Double) {
+  public func addStickerView(id: Int, imagePath: String, centerX: Double, centerY: Double, size: Double, radians: Double) {
     let i = stickerViews.firstIndex(where: { $0.id == id })
 
     if i == nil {
@@ -412,15 +433,17 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
         return
       }
 
-      stickerViews.append(CRTStickerView(id: id, imageTexture: imageTexture, centerInPreview: (centerX, centerY), size: size))
+      stickerViews.append(CRTStickerView(id: id, imageTexture: imageTexture, centerInPreview: (centerX, centerY), size: size, radians: radians))
     } else {
       if i == stickerViews.count - 1 {
         stickerViews[i!].centerInPreview = (centerX, centerY)
         stickerViews[i!].size = size
+        stickerViews[i!].radians = radians
       } else {
         var removed = stickerViews.remove(at: i!)
         removed.centerInPreview = (centerX, centerY)
         removed.size = size
+        removed.radians = radians
         stickerViews.append(removed)
       }
     }
@@ -431,7 +454,7 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
     guard let i = stickerViews.firstIndex(where: { $0.id == id }) else {
       return;
     }
-    
+
     stickerViews.remove(at: i)
   }
 }

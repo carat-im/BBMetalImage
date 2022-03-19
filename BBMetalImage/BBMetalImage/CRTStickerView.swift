@@ -9,4 +9,5 @@ struct CRTStickerView {
   let imageTexture: MTLTexture
   var centerInPreview: (x: Double, y: Double) // (-1, -1) ~ (1, 1) 기준 좌표
   var size: Double
+  var radians: Double
 }
