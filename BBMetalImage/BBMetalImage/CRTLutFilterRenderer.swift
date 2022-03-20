@@ -44,15 +44,45 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
   private var stickerRenderPipeline: MTLRenderPipelineState?
   private let stickerRenderPassDescriptor = MTLRenderPassDescriptor()
 
-  // 후면 카메라용.
-  let stickerTextureCoordinatesBack = [
-    vector_float2(0, 1),
-    vector_float2(0, 0),
-    vector_float2(1, 0),
-    vector_float2(0, 1),
-    vector_float2(1, 0),
-    vector_float2(1, 1),
+  private let stickerTextureCoordinates = [
+    CRTFilterRendererType.PreviewBack: [
+      vector_float2(1, 1),
+      vector_float2(0, 1),
+      vector_float2(0, 0),
+      vector_float2(1, 1),
+      vector_float2(0, 0),
+      vector_float2(1, 0),
+    ],
+    CRTFilterRendererType.PreviewFront: [
+      vector_float2(1, 1),
+      vector_float2(0, 1),
+      vector_float2(0, 0),
+      vector_float2(1, 1),
+      vector_float2(0, 0),
+      vector_float2(1, 0),
+    ],
+    CRTFilterRendererType.PhotoBack: [
+      vector_float2(0, 1),
+      vector_float2(0, 0),
+      vector_float2(1, 0),
+      vector_float2(0, 1),
+      vector_float2(1, 0),
+      vector_float2(1, 1),
+    ],
+    CRTFilterRendererType.PhotoFront: [
+      vector_float2(1, 1),
+      vector_float2(1, 0),
+      vector_float2(0, 0),
+      vector_float2(1, 1),
+      vector_float2(0, 0),
+      vector_float2(0, 1),
+    ]
   ]
+
+  private var type: CRTFilterRendererType = .PreviewBack
+
+  @objc
+  public var drawSticker: Bool = true
 
   public required override init() {
     do {
@@ -76,7 +106,9 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
   }
 
   @objc
-  public func prepare(with formatDescription: CMFormatDescription, outputRetainedBufferCountHint: Int) {
+  public func prepare(with formatDescription: CMFormatDescription, outputRetainedBufferCountHint: Int,
+                      type: CRTFilterRendererType) {
+    self.type = type
     reset()
 
     (outputPixelBufferPool, _, _) = allocateOutputBufferPool(with: formatDescription,
@@ -284,7 +316,7 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
 
     // 스티커 시작
 
-    if !stickerViews.isEmpty {
+    if !stickerViews.isEmpty && drawSticker {
       stickerRenderPassDescriptor.colorAttachments[0].texture = outputTexture
 
       let isWidthHeightOpposite = outputTexture.width > outputTexture.height
@@ -331,27 +363,56 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
         let previewCenterX = stickerView.centerInPreview.x
         let previewCenterY = stickerView.centerInPreview.y
 
-        // 후면 카메라의 경우, cameraData가 preview에 보이기까지 2 과정을 거친다.
-        // 1. 위아래 flip.
-        // 2. 90도 clockwise 회전.
-        // 따라서, 이 과정을 반대로 거친 위치에 스티커를 붙여야 한다.
+        var cameraDataCenterXNorm = previewCenterX
+        var cameraDataCenterYNorm = previewCenterY
+        switch type {
+        case .PhotoBack:
+          // 후면 사진의 경우, cameraData가 preview에 보이기까지 2 과정을 거친다.
+          // 1. 위아래 flip.
+          // 2. 90도 clockwise 회전.
+          // 따라서, 이 과정을 반대로 거친 위치에 스티커를 붙여야 한다.
 
-        // 90도만큼 counter-clockwise로 회전
-        let radians = Double.pi / 2
-        var cameraDataCenterXNorm = previewCenterX * cos(radians) - previewCenterY * sin(radians)
-        var cameraDataCenterYNorm = previewCenterX * sin(radians) + previewCenterY * cos(radians)
+          // 90도만큼 counter-clockwise로 회전
+          let radians = Double.pi / 2
+          cameraDataCenterXNorm = previewCenterX * cos(radians) - previewCenterY * sin(radians)
+          cameraDataCenterYNorm = previewCenterX * sin(radians) + previewCenterY * cos(radians)
 
-        // 위 아래 flip.
-        if (isWidthHeightOpposite) {
-          cameraDataCenterXNorm *= -1
-        } else {
-          cameraDataCenterYNorm *= -1
+          // 위 아래 flip.
+          if (isWidthHeightOpposite) {
+            cameraDataCenterXNorm *= -1
+          } else {
+            cameraDataCenterYNorm *= -1
+          }
+        case .PhotoFront:
+          let radians = -Double.pi / 2
+          cameraDataCenterXNorm = previewCenterX * cos(radians) - previewCenterY * sin(radians)
+          cameraDataCenterYNorm = previewCenterX * sin(radians) + previewCenterY * cos(radians)
+        case .PreviewBack:
+          if (isWidthHeightOpposite) {
+            cameraDataCenterXNorm *= -1
+          } else {
+            cameraDataCenterYNorm *= -1
+          }
+        case .PreviewFront:
+          if (isWidthHeightOpposite) {
+            cameraDataCenterXNorm *= -1
+          } else {
+            cameraDataCenterYNorm *= -1
+          }
+        default:
+          break
         }
 
         let cameraDataCenterX: Float = Float(Double(cameraDataStickerBoardViewport.x) / 2 * cameraDataCenterXNorm)
         let cameraDataCenterY: Float = Float(Double(cameraDataStickerBoardViewport.y) / 2 * cameraDataCenterYNorm)
         let halfSize: Float = Float(stickerView.size / 2) * mf
-        let stickerRadians: Float = Float.pi * 2 - Float(stickerView.radians) // counter-clockwise로 변환.
+        let stickerRadians: Float
+        if type == .PhotoFront {
+          stickerRadians = Float(stickerView.radians)
+        } else {
+          // counter-clockwise로 변환.
+          stickerRadians = Float.pi * 2 - Float(stickerView.radians)
+        }
         var quadPositions: [vector_float2] = []
         var x: Float = cosf(stickerRadians) * halfSize - sinf(stickerRadians) * -halfSize + cameraDataCenterX
         var y: Float = sinf(stickerRadians) * halfSize + cosf(stickerRadians) * -halfSize + cameraDataCenterY
@@ -372,13 +433,14 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
         y = sinf(stickerRadians) * halfSize + cosf(stickerRadians) * halfSize + cameraDataCenterY
         quadPositions.append(vector_float2(x, y))
 
+        let textureCoordinates = stickerTextureCoordinates[type]!
         let quadVertices = [
-          CRTVertex(position: quadPositions[0], textureCoordinate: stickerTextureCoordinatesBack[0]),
-          CRTVertex(position: quadPositions[1], textureCoordinate: stickerTextureCoordinatesBack[1]),
-          CRTVertex(position: quadPositions[2], textureCoordinate: stickerTextureCoordinatesBack[2]),
-          CRTVertex(position: quadPositions[3], textureCoordinate: stickerTextureCoordinatesBack[3]),
-          CRTVertex(position: quadPositions[4], textureCoordinate: stickerTextureCoordinatesBack[4]),
-          CRTVertex(position: quadPositions[5], textureCoordinate: stickerTextureCoordinatesBack[5]),
+          CRTVertex(position: quadPositions[0], textureCoordinate: textureCoordinates[0]),
+          CRTVertex(position: quadPositions[1], textureCoordinate: textureCoordinates[1]),
+          CRTVertex(position: quadPositions[2], textureCoordinate: textureCoordinates[2]),
+          CRTVertex(position: quadPositions[3], textureCoordinate: textureCoordinates[3]),
+          CRTVertex(position: quadPositions[4], textureCoordinate: textureCoordinates[4]),
+          CRTVertex(position: quadPositions[5], textureCoordinate: textureCoordinates[5]),
         ]
 
         let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: stickerRenderPassDescriptor)!

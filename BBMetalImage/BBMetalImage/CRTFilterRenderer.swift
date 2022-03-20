@@ -12,7 +12,8 @@ protocol CRTFilterRenderer {
   var isPrepared: Bool { get }
 
   // Prepare resources.
-  func prepare(with inputFormatDescription: CMFormatDescription, outputRetainedBufferCountHint: Int)
+  func prepare(with inputFormatDescription: CMFormatDescription, outputRetainedBufferCountHint: Int,
+               type: CRTFilterRendererType)
 
   // Release resources.
   func reset()
