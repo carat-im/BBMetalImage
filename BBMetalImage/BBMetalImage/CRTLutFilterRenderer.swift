@@ -95,7 +95,16 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
       renderPipelineDescriptor.vertexFunction = library.makeFunction(name: "vertexShader")
       renderPipelineDescriptor.fragmentFunction = library.makeFunction(name: "samplingShader")
       renderPipelineDescriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
-      renderPipelineDescriptor.isAlphaToCoverageEnabled = true
+
+      // https://github.com/s1ddok/Alloy/blob/master/Sources/Alloy/Core/Extensions/Metal/MTLRenderPipelineColorAttachmentDescriptor%2BExtensions.swift
+      renderPipelineDescriptor.colorAttachments[0].isBlendingEnabled = true
+      renderPipelineDescriptor.colorAttachments[0].rgbBlendOperation = .add
+      renderPipelineDescriptor.colorAttachments[0].alphaBlendOperation = .add
+      renderPipelineDescriptor.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
+      renderPipelineDescriptor.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+      renderPipelineDescriptor.colorAttachments[0].sourceAlphaBlendFactor = .sourceAlpha
+      renderPipelineDescriptor.colorAttachments[0].destinationAlphaBlendFactor = .one
+
       stickerRenderPipeline = try metalDevice.makeRenderPipelineState(descriptor: renderPipelineDescriptor)
 
       stickerRenderPassDescriptor.colorAttachments[0].loadAction = .load

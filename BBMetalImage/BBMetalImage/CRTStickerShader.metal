@@ -57,7 +57,7 @@ vertexShader(uint                   vertexID             [[ vertex_id ]],
 
 // Fragment function
 fragment float4 samplingShader(RasterizerData  in           [[stage_in]],
-                               texture2d<half> samplingTexture [[ texture(CRTTextureIndexInput) ]])
+                               texture2d<half, access::sample> samplingTexture [[ texture(CRTTextureIndexInput) ]])
 {
     constexpr sampler textureSampler (mag_filter::linear,
                                       min_filter::linear);
