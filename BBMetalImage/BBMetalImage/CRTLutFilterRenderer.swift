@@ -76,7 +76,15 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
       vector_float2(1, 1),
       vector_float2(0, 0),
       vector_float2(0, 1),
-    ]
+    ],
+    CRTFilterRendererType.Image: [
+      vector_float2(1, 1),
+      vector_float2(0, 1),
+      vector_float2(0, 0),
+      vector_float2(1, 1),
+      vector_float2(0, 0),
+      vector_float2(1, 0),
+    ],
   ]
 
   private var type: CRTFilterRendererType = .PreviewBack
@@ -328,7 +336,7 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
     if !stickerViews.isEmpty && drawSticker {
       stickerRenderPassDescriptor.colorAttachments[0].texture = outputTexture
 
-      let isWidthHeightOpposite = outputTexture.width > outputTexture.height
+      let isWidthHeightOpposite = type != .Image && outputTexture.width > outputTexture.height
 
       // 화면에 보이는 프리뷰 기준의 width와 height.
       let previewTextureWidth: Double = isWidthHeightOpposite ? Double(outputTexture.height) : Double(outputTexture.width)
@@ -408,6 +416,8 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
           } else {
             cameraDataCenterYNorm *= -1
           }
+        case .Image:
+          cameraDataCenterYNorm *= -1
         default:
           break
         }

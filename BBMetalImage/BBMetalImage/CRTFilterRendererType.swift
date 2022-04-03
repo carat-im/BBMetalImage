@@ -9,4 +9,5 @@ import Foundation
   case PreviewFront
   case PhotoBack
   case PhotoFront
+  case Image
 }
