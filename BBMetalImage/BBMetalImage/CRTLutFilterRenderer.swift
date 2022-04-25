@@ -477,6 +477,8 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
     // 스티커 끝
 
     commandBuffer.commit()
+    commandBuffer.waitUntilCompleted()
+
     return outputPixelBuffer
   }
 
