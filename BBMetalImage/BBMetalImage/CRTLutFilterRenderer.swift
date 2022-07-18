@@ -15,11 +15,9 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
 
   @objc public var isPrepared = false
 
-  private(set) var inputFormatDescription: CMFormatDescription?
-
-  private(set) var outputFormatDescription: CMFormatDescription?
-
   private var outputPixelBufferPool: CVPixelBufferPool?
+
+  private var previewPixelBufferPool: CVPixelBufferPool?
 
   private let metalDevice = MTLCreateSystemDefaultDevice()!
 
@@ -128,12 +126,11 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
     self.type = type
     reset()
 
-    (outputPixelBufferPool, _, _) = allocateOutputBufferPool(with: formatDescription,
+    (outputPixelBufferPool, previewPixelBufferPool) = allocateOutputBufferPools(with: formatDescription,
       outputRetainedBufferCountHint: outputRetainedBufferCountHint)
-    if outputPixelBufferPool == nil {
+    if outputPixelBufferPool == nil || previewPixelBufferPool == nil {
       return
     }
-    inputFormatDescription = formatDescription
 
     var metalTextureCache: CoreVideo.CVMetalTextureCache?
     if CVMetalTextureCacheCreate(kCFAllocatorDefault, nil, metalDevice, nil, &metalTextureCache) != kCVReturnSuccess {
@@ -145,26 +142,34 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
     isPrepared = true
   }
 
-  private func allocateOutputBufferPool(with inputFormatDescription: CMFormatDescription, outputRetainedBufferCountHint: Int) -> (
+  private func allocateOutputBufferPools(with inputFormatDescription: CMFormatDescription, outputRetainedBufferCountHint: Int) -> (
     outputBufferPool: CVPixelBufferPool?,
-    outputColorSpace: CGColorSpace?,
-    outputFormatDescription: CMFormatDescription?) {
+    previewBufferPool: CVPixelBufferPool?) {
     let inputMediaSubType = CMFormatDescriptionGetMediaSubType(inputFormatDescription)
     if inputMediaSubType != kCVPixelFormatType_32BGRA {
       assertionFailure("Invalid input pixel buffer type \(inputMediaSubType)")
-      return (nil, nil, nil)
+      return (nil, nil)
     }
 
     let inputDimensions = CMVideoFormatDescriptionGetDimensions(inputFormatDescription)
+    let width = Int(inputDimensions.width)
+    let height = Int(inputDimensions.height)
+    let previewWidth = Int(UIScreen.main.bounds.width * UIScreen.main.scale)
+    let previewHeight = Int(height * previewWidth / width)
     var pixelBufferAttributes: [String: Any] = [
       kCVPixelBufferPixelFormatTypeKey as String: UInt(inputMediaSubType),
-      kCVPixelBufferWidthKey as String: Int(inputDimensions.width),
-      kCVPixelBufferHeightKey as String: Int(inputDimensions.height),
+      kCVPixelBufferWidthKey as String: width,
+      kCVPixelBufferHeightKey as String: height,
+      kCVPixelBufferIOSurfacePropertiesKey as String: [:]
+    ]
+    var previewPixelBufferAttributes: [String: Any] = [
+      kCVPixelBufferPixelFormatTypeKey as String: UInt(inputMediaSubType),
+      kCVPixelBufferWidthKey as String: previewWidth,
+      kCVPixelBufferHeightKey as String: previewHeight,
       kCVPixelBufferIOSurfacePropertiesKey as String: [:]
     ]
 
     // Get pixel buffer attributes and color space from the input format description.
-    var cgColorSpace = CGColorSpaceCreateDeviceRGB()
     if let inputFormatDescriptionExtension = CMFormatDescriptionGetExtensions(inputFormatDescription) as Dictionary? {
       let colorPrimaries = inputFormatDescriptionExtension[kCVImageBufferColorPrimariesKey]
 
@@ -180,39 +185,25 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
         }
 
         pixelBufferAttributes[kCVBufferPropagatedAttachmentsKey as String] = colorSpaceProperties
-      }
-
-      if let cvColorspace = inputFormatDescriptionExtension[kCVImageBufferCGColorSpaceKey] {
-        cgColorSpace = cvColorspace as! CGColorSpace
-      } else if (colorPrimaries as? String) == (kCVImageBufferColorPrimaries_P3_D65 as String) {
-        cgColorSpace = CGColorSpace(name: CGColorSpace.displayP3)!
+        previewPixelBufferAttributes[kCVBufferPropagatedAttachmentsKey as String] = colorSpaceProperties
       }
     }
 
     // Create a pixel buffer pool with the same pixel attributes as the input format description.
     let poolAttributes = [kCVPixelBufferPoolMinimumBufferCountKey as String: outputRetainedBufferCountHint]
     var cvPixelBufferPool: CVPixelBufferPool?
+    var previewCvPixelBufferPool: CVPixelBufferPool?
     CVPixelBufferPoolCreate(kCFAllocatorDefault, poolAttributes as NSDictionary?, pixelBufferAttributes as NSDictionary?, &cvPixelBufferPool)
-    guard let pixelBufferPool = cvPixelBufferPool else {
+    CVPixelBufferPoolCreate(kCFAllocatorDefault, poolAttributes as NSDictionary?, previewPixelBufferAttributes as NSDictionary?, &previewCvPixelBufferPool)
+    guard let pixelBufferPool = cvPixelBufferPool, let previewPixelBufferPool = previewCvPixelBufferPool else {
       assertionFailure("Allocation failure: Could not allocate pixel buffer pool.")
-      return (nil, nil, nil)
+      return (nil, nil)
     }
 
     preallocateBuffers(pool: pixelBufferPool, allocationThreshold: outputRetainedBufferCountHint)
+    preallocateBuffers(pool: previewPixelBufferPool, allocationThreshold: outputRetainedBufferCountHint)
 
-    // Get the output format description.
-    var pixelBuffer: CVPixelBuffer?
-    var outputFormatDescription: CMFormatDescription?
-    let auxAttributes = [kCVPixelBufferPoolAllocationThresholdKey as String: outputRetainedBufferCountHint] as NSDictionary
-    CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(kCFAllocatorDefault, pixelBufferPool, auxAttributes, &pixelBuffer)
-    if let pixelBuffer = pixelBuffer {
-      CMVideoFormatDescriptionCreateForImageBuffer(allocator: kCFAllocatorDefault,
-        imageBuffer: pixelBuffer,
-        formatDescriptionOut: &outputFormatDescription)
-    }
-    pixelBuffer = nil
-
-    return (pixelBufferPool, cgColorSpace, outputFormatDescription)
+    return (pixelBufferPool, previewPixelBufferPool)
   }
 
   private func preallocateBuffers(pool: CVPixelBufferPool, allocationThreshold: Int) {
@@ -233,8 +224,7 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
   @objc
   public func reset() {
     outputPixelBufferPool = nil
-    outputFormatDescription = nil
-    inputFormatDescription = nil
+    previewPixelBufferPool = nil
     textureCache = nil
     isPrepared = false
   }
@@ -276,19 +266,23 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
   }
 
   @objc
-  public func render(pixelBuffer: CVPixelBuffer) -> CVPixelBuffer? {
-    render(inputTexture: makeTextureFromCVPixelBuffer(pixelBuffer: pixelBuffer, textureFormat: .bgra8Unorm));
+  public func render(pixelBuffer: CVPixelBuffer, forPreview: Bool) -> CVPixelBuffer? {
+    render(inputTexture: makeTextureFromCVPixelBuffer(pixelBuffer: pixelBuffer, textureFormat: .bgra8Unorm), forPreview: forPreview);
   }
 
   @objc
-  public func render(inputTexture input: MTLTexture?) -> CVPixelBuffer? {
+  public func render(inputTexture input: MTLTexture?, forPreview: Bool) -> CVPixelBuffer? {
     if !isPrepared {
       assertionFailure("Invalid state: Not prepared.")
       return nil
     }
 
     var newPixelBuffer: CVPixelBuffer?
-    CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, outputPixelBufferPool!, &newPixelBuffer)
+    if (forPreview) {
+      CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, previewPixelBufferPool!, &newPixelBuffer)
+    } else {
+      CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, outputPixelBufferPool!, &newPixelBuffer)
+    }
     guard let outputPixelBuffer = newPixelBuffer else {
       print("Allocation failure: Could not get pixel buffer from pool. (\(self.description))")
       return nil

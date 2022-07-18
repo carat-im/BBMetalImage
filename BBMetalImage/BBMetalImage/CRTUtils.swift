@@ -7,7 +7,7 @@ import MobileCoreServices
 
 @objcMembers
 public class CRTUtils: NSObject {
-  public static func jpegData(withPixelBuffer pixelBuffer: CVPixelBuffer, attachments: CFDictionary?, aspectRatio: Double, mirror: Bool, orientation: UIDeviceOrientation) -> Data? {
+  public static func jpegData(withPixelBuffer pixelBuffer: CVPixelBuffer, attachments: CFDictionary?, aspectRatio: Double, orientation: UIDeviceOrientation) -> Data? {
     let ciContext = CIContext()
     var renderedCIImage = CIImage(cvImageBuffer: pixelBuffer)
 

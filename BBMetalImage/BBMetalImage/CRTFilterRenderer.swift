@@ -18,13 +18,7 @@ protocol CRTFilterRenderer {
   // Release resources.
   func reset()
 
-  // The format description of the output pixel buffers.
-  var outputFormatDescription: CMFormatDescription? { get }
-
-  // The format description of the input pixel buffers.
-  var inputFormatDescription: CMFormatDescription? { get }
-
   // Render the pixel buffer.
-  func render(pixelBuffer: CVPixelBuffer) -> CVPixelBuffer?
+  func render(pixelBuffer: CVPixelBuffer, forPreview: Bool) -> CVPixelBuffer?
 }
 
