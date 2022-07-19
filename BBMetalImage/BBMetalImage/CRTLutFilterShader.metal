@@ -20,7 +20,8 @@ lutFilterKernel(texture2d<half, access::read> inputTexture [[texture(CRTTextureI
     const half4 base = inputTexture.read(gid);
 
     if (is_null_texture(lookupTexture)) {
-        outputTexture.write(base, gid);
+        const half4 brightened = clamp(base * 1.1, half4(0.0), half4(1.1));
+        outputTexture.write(brightened, gid);
         return;
     }
 
