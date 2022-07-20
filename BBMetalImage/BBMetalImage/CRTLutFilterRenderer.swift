@@ -23,7 +23,7 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
 
   private var lutFilterComputePipeline: MTLComputePipelineState?
 
-  private var textureCache: CoreVideo.CVMetalTextureCache!
+  private var textureCache: CoreVideo.CVMetalTextureCache?
 
   private lazy var commandQueue: MTLCommandQueue? = {
     self.metalDevice.makeCommandQueue()
@@ -225,6 +225,9 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
   public func reset() {
     outputPixelBufferPool = nil
     previewPixelBufferPool = nil
+    if (textureCache != nil) {
+      CVMetalTextureCacheFlush(textureCache!, 0)
+    }
     textureCache = nil
     isPrepared = false
   }
@@ -273,7 +276,6 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
   @objc
   public func render(inputTexture input: MTLTexture?, forPreview: Bool) -> CVPixelBuffer? {
     if !isPrepared {
-      assertionFailure("Invalid state: Not prepared.")
       return nil
     }
 
@@ -297,7 +299,9 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
           let commandBuffer = commandQueue.makeCommandBuffer(),
           let computeEncoder = commandBuffer.makeComputeCommandEncoder() else {
       print("Failed to create a Metal command queue.")
-      CVMetalTextureCacheFlush(textureCache, 0)
+      if (textureCache != nil) {
+        CVMetalTextureCacheFlush(textureCache!, 0)
+      }
       return nil
     }
 
@@ -477,15 +481,19 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
   }
 
   private func makeTextureFromCVPixelBuffer(pixelBuffer: CVPixelBuffer, textureFormat: MTLPixelFormat) -> MTLTexture? {
+    if (textureCache == nil) {
+      return nil
+    }
+
     let width = CVPixelBufferGetWidth(pixelBuffer)
     let height = CVPixelBufferGetHeight(pixelBuffer)
 
     // Create a Metal texture from the image buffer.
     var cvTextureOut: CoreVideo.CVMetalTexture?
-    CVMetalTextureCacheCreateTextureFromImage(kCFAllocatorDefault, textureCache, pixelBuffer, nil, textureFormat, width, height, 0, &cvTextureOut)
+    CVMetalTextureCacheCreateTextureFromImage(kCFAllocatorDefault, textureCache!, pixelBuffer, nil, textureFormat, width, height, 0, &cvTextureOut)
 
     guard let cvTexture = cvTextureOut, let texture = CVMetalTextureGetTexture(cvTexture) else {
-      CVMetalTextureCacheFlush(textureCache, 0)
+      CVMetalTextureCacheFlush(textureCache!, 0)
 
       return nil
     }
