@@ -37,5 +37,8 @@ Pod::Spec.new do |s|
   s.exclude_files = 'BBMetalImage/BBMetalImage/MultipleVideoSource.swift'
 
   s.private_header_files = 'BBMetalImage/BBMetalImage/BBMetalShaderTypes.h'
+  
+  s.dependency 'MetalPetal'
+  s.dependency 'MetalPetal/Swift'
 
 end

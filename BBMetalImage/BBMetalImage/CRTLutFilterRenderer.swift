@@ -6,6 +6,7 @@ import CoreMedia
 import CoreVideo
 import Metal
 import MetalKit
+import MetalPetal
 
 public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
   @objc public static let FILTER_DIR_SUPPORT = 0
@@ -90,6 +91,11 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
   @objc
   public var drawSticker: Bool = true
 
+  private var mtiContext: MTIContext?
+  private let skinSmoothingFilter = MTIHighPassSkinSmoothingFilter()
+
+  private var skinSmooth: Float = 0
+
   public required override init() {
     do {
       let library = try metalDevice.makeDefaultLibrary(bundle: Bundle(for: CRTLutFilterRenderer.self))
@@ -115,6 +121,8 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
 
       stickerRenderPassDescriptor.colorAttachments[0].loadAction = .load
       stickerRenderPassDescriptor.colorAttachments[0].storeAction = .store
+
+      mtiContext = try? MTIContext(device: metalDevice, options: MTIContextOptions())
     } catch {
       print("Could not create pipeline state: \(error)")
     }
@@ -246,6 +254,11 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
     self.intensity = intensity
   }
 
+  @objc
+  public func setSkinSmooth(_ skinSmooth: Float) {
+    self.skinSmooth = skinSmooth
+  }
+
   private func configureLutTexture(_ lutFilePath: NSString?, _ filterDir: Int) {
     if lutFilePath?.isKind(of: NSNull.self) != false {
       lutTexture = nil
@@ -289,9 +302,22 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
       print("Allocation failure: Could not get pixel buffer from pool. (\(self.description))")
       return nil
     }
-    guard let inputTexture = input,
+    guard var inputTexture = input,
           let outputTexture = makeTextureFromCVPixelBuffer(pixelBuffer: outputPixelBuffer, textureFormat: .bgra8Unorm) else {
       return nil
+    }
+
+    let mtiImage = MTIImage(texture: inputTexture, alphaType: .alphaIsOne)
+    skinSmoothingFilter.inputImage = mtiImage
+    skinSmoothingFilter.amount = skinSmooth
+    let outputMtiImage = skinSmoothingFilter.outputImage
+    if (outputMtiImage != nil && mtiContext != nil) {
+      do {
+        let task = try mtiContext!.startTask(toRender: outputMtiImage!, to: inputTexture, destinationAlphaType: .alphaIsOne)
+        task.waitUntilCompleted()
+      } catch {
+        print(error)
+      }
     }
 
     // Set up command queue, buffer, and encoder.
