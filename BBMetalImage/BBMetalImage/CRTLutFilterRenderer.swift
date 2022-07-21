@@ -310,6 +310,7 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
     let mtiImage = MTIImage(texture: inputTexture, alphaType: .alphaIsOne)
     skinSmoothingFilter.inputImage = mtiImage
     skinSmoothingFilter.amount = skinSmooth
+    skinSmoothingFilter.radius = 6.0
     let outputMtiImage = skinSmoothingFilter.outputImage
     if (outputMtiImage != nil && mtiContext != nil) {
       do {
