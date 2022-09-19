@@ -7,13 +7,9 @@ import MobileCoreServices
 
 @objcMembers
 public class CRTUtils: NSObject {
-  public static func jpegData(withPixelBuffer pixelBuffer: CVPixelBuffer, attachments: CFDictionary?, aspectRatio: Double, mirror: Bool, orientation: UIDeviceOrientation) -> Data? {
+  public static func jpegData(withPixelBuffer pixelBuffer: CVPixelBuffer, attachments: CFDictionary?, aspectRatio: Double, orientation: UIDeviceOrientation) -> Data? {
     let ciContext = CIContext()
     var renderedCIImage = CIImage(cvImageBuffer: pixelBuffer)
-
-    if mirror {
-      renderedCIImage = renderedCIImage.oriented(.downMirrored)
-    }
 
     switch orientation {
     case .landscapeLeft:
@@ -29,8 +25,8 @@ public class CRTUtils: NSObject {
     let orientedLandscape = orientation == .landscapeRight || orientation == .landscapeLeft
     var bounds = renderedCIImage.extent
     if aspectRatio != 0 {
-      let imageWidth = orientedLandscape ? bounds.width : bounds.height
-      let imageHeight = orientedLandscape ? bounds.height : bounds.width
+      let imageWidth = orientedLandscape ? bounds.height : bounds.width
+      let imageHeight = orientedLandscape ? bounds.width : bounds.height
       var realWidth = imageWidth
       let realHeight = realWidth / aspectRatio
       let changedHeightDelta = realHeight - imageHeight
@@ -46,9 +42,9 @@ public class CRTUtils: NSObject {
       }
 
       if (orientedLandscape) {
-        bounds = bounds.insetBy(dx: horizontalCutOff, dy: verticalCutOff)
-      } else {
         bounds = bounds.insetBy(dx: verticalCutOff, dy: horizontalCutOff)
+      } else {
+        bounds = bounds.insetBy(dx: horizontalCutOff, dy: verticalCutOff)
       }
     }
     guard let renderedCGImage = ciContext.createCGImage(renderedCIImage, from: bounds) else {
