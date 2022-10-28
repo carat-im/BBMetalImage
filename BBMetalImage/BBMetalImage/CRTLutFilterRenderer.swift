@@ -8,9 +8,6 @@ import Metal
 import MetalKit
 
 public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
-  @objc public static let FILTER_DIR_SUPPORT = 0
-  @objc public static let FILTER_DIR_CACHE = 1
-
   var name: String = "CRTLutFilterRenderer"
 
   @objc public var isPrepared = false
@@ -28,11 +25,6 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
   private lazy var commandQueue: MTLCommandQueue? = {
     self.metalDevice.makeCommandQueue()
   }()
-
-  private var lutTexture: MTLTexture?
-  private var intensity: Float = 0
-  private var grain: Float = 0
-  private var vignette: Float = 0
 
   // 화면에 보이는 프리뷰 기준의 viewport e.g. 360x640
   private var previewStickerBoardViewport: (width: Double, height: Double) = (0, 0)
@@ -233,42 +225,6 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
   }
 
   @objc
-  public func setColorFilter(lutFilePath: NSString, intensity: NSNumber, grain: NSNumber, vignette: NSNumber, filterDir: Int) {
-    configureLutTexture(lutFilePath, filterDir)
-
-    self.intensity = intensity.isKind(of: NSNull.self) ? 0 : intensity.floatValue
-    self.grain = grain.isKind(of: NSNull.self) ? 0 : grain.floatValue
-    self.vignette = vignette.isKind(of: NSNull.self) ? 0 : vignette.floatValue
-  }
-
-  @objc
-  public func setColorFilterIntensity(_ intensity: Float) {
-    self.intensity = intensity
-  }
-
-  private func configureLutTexture(_ lutFilePath: NSString?, _ filterDir: Int) {
-    if lutFilePath?.isKind(of: NSNull.self) != false {
-      lutTexture = nil
-      return
-    }
-
-    let dirUrl: URL?
-    if filterDir == CRTLutFilterRenderer.FILTER_DIR_CACHE {
-      dirUrl = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
-    } else {
-      dirUrl = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-    }
-
-    guard let lutUrl = dirUrl?.appendingPathComponent(String(lutFilePath!)) else {
-      lutTexture = nil
-      return
-    }
-
-    let data = try? Data(contentsOf: lutUrl)
-    lutTexture = data?.metalTexture
-  }
-
-  @objc
   public func render(pixelBuffer: CVPixelBuffer, forPreview: Bool) -> CVPixelBuffer? {
     render(inputTexture: makeTextureFromCVPixelBuffer(pixelBuffer: pixelBuffer, textureFormat: .bgra8Unorm), forPreview: forPreview);
   }
@@ -311,10 +267,6 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
     computeEncoder.setComputePipelineState(lutFilterComputePipeline!)
     computeEncoder.setTexture(inputTexture, index: Int(CRTTextureIndexInput.rawValue))
     computeEncoder.setTexture(outputTexture, index: Int(CRTTextureIndexOutput.rawValue))
-    computeEncoder.setTexture(lutTexture, index: Int(CRTTextureIndexLut.rawValue))
-    computeEncoder.setBytes(&intensity, length: MemoryLayout<Float>.size, index: Int(CRTBufferIndexIntensity.rawValue))
-    computeEncoder.setBytes(&grain, length: MemoryLayout<Float>.size, index: Int(CRTBufferIndexGrain.rawValue))
-    computeEncoder.setBytes(&vignette, length: MemoryLayout<Float>.size, index: Int(CRTBufferIndexVignette.rawValue))
 
     // Set up the thread groups.
     let width = lutFilterComputePipeline!.threadExecutionWidth

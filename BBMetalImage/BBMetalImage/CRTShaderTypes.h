@@ -11,15 +11,7 @@ typedef enum CRTTextureIndex
 {
     CRTTextureIndexInput  = 0,
     CRTTextureIndexOutput = 1,
-    CRTTextureIndexLut = 2,
 } CRTTextureIndex;
-
-typedef enum CRTBufferIndex
-{
-    CRTBufferIndexIntensity = 0,
-    CRTBufferIndexGrain = 1,
-    CRTBufferIndexVignette = 2,
-} CRTBufferIndex;
 
 
 typedef struct
