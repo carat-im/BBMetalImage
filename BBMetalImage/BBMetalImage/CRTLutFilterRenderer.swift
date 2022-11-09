@@ -463,9 +463,8 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
     let i = stickerViews.firstIndex(where: { $0.id == id })
 
     if i == nil {
-      let dirUrl = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-      guard let imageUrl = URL(string: imagePath, relativeTo: dirUrl),
-            let imageData = try? Data(contentsOf: imageUrl),
+      let imageUrl = URL(fileURLWithPath: imagePath)
+      guard let imageData = try? Data(contentsOf: imageUrl),
             let imageTexture = imageData.metalTexture else {
         return
       }
