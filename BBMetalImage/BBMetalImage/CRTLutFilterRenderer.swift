@@ -235,6 +235,11 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
       return nil
     }
 
+    if previewPixelBufferPool == nil || outputPixelBufferPool == nil {
+      reset()
+      return nil
+    }
+
     var newPixelBuffer: CVPixelBuffer?
     if (forPreview) {
       CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, previewPixelBufferPool!, &newPixelBuffer)
