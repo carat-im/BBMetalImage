@@ -114,12 +114,12 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
 
   @objc
   public func prepare(with formatDescription: CMFormatDescription, outputRetainedBufferCountHint: Int,
-                      type: CRTFilterRendererType) {
+                      type: CRTFilterRendererType, w: Int, h: Int, previewWidth: Int, previewHeight: Int) {
     self.type = type
     reset()
 
     (outputPixelBufferPool, previewPixelBufferPool) = allocateOutputBufferPools(with: formatDescription,
-      outputRetainedBufferCountHint: outputRetainedBufferCountHint)
+      outputRetainedBufferCountHint: outputRetainedBufferCountHint, w:w, h:h, previewWidth: previewWidth, previewHeight: previewHeight)
     if outputPixelBufferPool == nil || previewPixelBufferPool == nil {
       return
     }
@@ -134,7 +134,8 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
     isPrepared = true
   }
 
-  private func allocateOutputBufferPools(with inputFormatDescription: CMFormatDescription, outputRetainedBufferCountHint: Int) -> (
+  private func allocateOutputBufferPools(with inputFormatDescription: CMFormatDescription, outputRetainedBufferCountHint: Int,
+                                         w: Int, h: Int, previewWidth: Int, previewHeight: Int) -> (
     outputBufferPool: CVPixelBufferPool?,
     previewBufferPool: CVPixelBufferPool?) {
     let inputMediaSubType = CMFormatDescriptionGetMediaSubType(inputFormatDescription)
@@ -144,10 +145,9 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
     }
 
     let inputDimensions = CMVideoFormatDescriptionGetDimensions(inputFormatDescription)
-    let width = Int(inputDimensions.width)
-    let height = Int(inputDimensions.height)
-    let previewWidth = Int(UIScreen.main.bounds.width * UIScreen.main.scale)
-    let previewHeight = Int(height * previewWidth / width)
+    let width = w == 0 ? Int(inputDimensions.width) : w
+    let height = h == 0 ? Int(inputDimensions.height) : h
+
     var pixelBufferAttributes: [String: Any] = [
       kCVPixelBufferPixelFormatTypeKey as String: UInt(inputMediaSubType),
       kCVPixelBufferWidthKey as String: width,

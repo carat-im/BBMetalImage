@@ -13,7 +13,7 @@ protocol CRTFilterRenderer {
 
   // Prepare resources.
   func prepare(with inputFormatDescription: CMFormatDescription, outputRetainedBufferCountHint: Int,
-               type: CRTFilterRendererType)
+               type: CRTFilterRendererType, w: Int, h: Int, previewWidth: Int, previewHeight: Int)
 
   // Release resources.
   func reset()
