@@ -43,18 +43,13 @@ public extension UIImage {
   func withMaxDimension(_ dimension: CGFloat) -> UIImage {
     let widthRatio = size.width / dimension
     let heightRatio = size.height / dimension
-    if widthRatio > 1 || heightRatio > 1 {
-      let biggerRatio = max(widthRatio, heightRatio)
-      let percentage = 1 / biggerRatio
-      let canvas = CGSize(width: size.width * percentage, height: size.height * percentage)
-      let format = imageRendererFormat
-      return UIGraphicsImageRenderer(size: canvas, format: format).image {
-        _ in
-        draw(in: CGRect(origin: .zero, size: canvas))
-      }
-    } else {
-      // No need to scale.
-      return self
+    let biggerRatio = max(1, max(widthRatio, heightRatio))
+    let percentage = 1 / biggerRatio
+    let canvas = CGSize(width: size.width * percentage, height: size.height * percentage)
+    let format = imageRendererFormat
+    return UIGraphicsImageRenderer(size: canvas, format: format).image {
+      _ in
+      draw(in: CGRect(origin: .zero, size: canvas))
     }
   }
 }
