@@ -140,7 +140,7 @@ public class CRTLutFilterRenderer: NSObject, CRTFilterRenderer {
     previewBufferPool: CVPixelBufferPool?) {
     let inputMediaSubType = CMFormatDescriptionGetMediaSubType(inputFormatDescription)
     if inputMediaSubType != kCVPixelFormatType_32BGRA {
-      assertionFailure("Invalid input pixel buffer type \(inputMediaSubType)")
+      print("Invalid input pixel buffer type \(inputMediaSubType)")
       return (nil, nil)
     }
 
